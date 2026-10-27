@@ -45,7 +45,8 @@ Errors: any Redis failure is returned as gRPC `FAILED_PRECONDITION` ("Can't acce
 | `ASPNETCORE_ENVIRONMENT` | No | `Production` (in container) | Standard ASP.NET Core |
 | `Kestrel__Endpoints__Grpc__Url` | No | `http://0.0.0.0:7070` | Override the gRPC listener (standard .NET env-var-to-config mapping) |
 | `Logging__Console__FormatterName` | No | default (plain text) | Set to `json` for JSON console logs |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4317` | OTLP/**gRPC** endpoint for **traces, metrics and logs** (scheme required), e.g. `http://alloy.monitoring.svc.cluster.local:4317`. Legacy fallback: `COLLECTOR_SERVICE_ADDR` (`host:port`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | unset (telemetry off) | OTLP/**gRPC** endpoint for **traces, metrics and logs** (scheme required), e.g. `http://alloy.monitoring.svc.cluster.local:4317`. Legacy fallback: `COLLECTOR_SERVICE_ADDR` (`host:port`). Telemetry is on only when this (or `COLLECTOR_SERVICE_ADDR`) is set and non-empty; an empty value means off (it used to crash startup with `new Uri("")`). Startup logs `Telemetry off` / `Telemetry on (OTLP …)` |
+| `OTEL_SDK_DISABLED` | No | — | `true` forces telemetry off even with an endpoint set (the legacy `ENABLE_TRACING=0` does the same) |
 | `OTEL_METRIC_EXPORT_INTERVAL` | No | `15000` | Milliseconds between metric pushes |
 | `OTEL_SERVICE_NAME` | No | `cart-service` | `service.name` — becomes the Prometheus `job` and the Loki `service_name`; keep the default, dashboards depend on it |
 | `SERVICE_VERSION` | No | `1.0.0` | `service.version` resource attribute |
