@@ -46,6 +46,17 @@ namespace cartservice.tests
         public void SdkDisabledFalse_KeepsOn() =>
             Assert.NotNull(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"), ("OTEL_SDK_DISABLED", "false"))));
 
+        [Theory]
+        [InlineData("foo")]
+        [InlineData("alloy:4317")]
+        [InlineData("grpc://alloy:4317")]
+        public void NotAnHttpUri_IsOff_AndDoesNotThrow(string value) =>
+            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", value))));
+
+        [Fact]
+        public void HttpsEndpoint_IsUsed() =>
+            Assert.Equal(new Uri("https://alloy:4317"), TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "https://alloy:4317"))));
+
         [Fact]
         public void LegacyEnableTracing0_ForcesOff() =>
             Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"), ("ENABLE_TRACING", "0"))));

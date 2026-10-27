@@ -23,11 +23,19 @@ namespace cartservice
             string endpoint = Value("OTEL_EXPORTER_OTLP_ENDPOINT");
             if (endpoint.Length > 0)
             {
-                return new Uri(endpoint);
+                return HttpUri(endpoint);
             }
 
             string legacy = Value("COLLECTOR_SERVICE_ADDR");
-            return legacy.Length > 0 ? new Uri($"http://{legacy}") : null;
+            return legacy.Length > 0 ? HttpUri($"http://{legacy}") : null;
         }
+
+        // An endpoint that is not an absolute http(s) URI ("foo", "alloy:4317" without the scheme) cannot be exported
+        // to; treat it as telemetry off instead of crashing startup (new Uri("foo")) or exporting to a bogus scheme.
+        private static Uri? HttpUri(string value) =>
+            Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                ? uri
+                : null;
     }
 }
