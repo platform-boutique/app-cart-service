@@ -2,8 +2,9 @@ namespace cartservice
 {
     /// <summary>
     /// Telemetry contract (same as the Go services): traces, metrics and logs are exported over OTLP/gRPC only when
-    /// OTEL_EXPORTER_OTLP_ENDPOINT (or the legacy COLLECTOR_SERVICE_ADDR, host:port) is set and non-empty;
-    /// OTEL_SDK_DISABLED=true (or the legacy ENABLE_TRACING=0) forces it off. There is no localhost default.
+    /// OTEL_EXPORTER_OTLP_ENDPOINT is an absolute http(s) URL; empty or malformed means off (never a crash);
+    /// OTEL_SDK_DISABLED=true (trimmed, case-insensitive) forces it off. There is no localhost default.
+    /// The legacy COLLECTOR_SERVICE_ADDR and ENABLE_TRACING are no longer read.
     /// </summary>
     public static class TelemetryConfig
     {
@@ -15,19 +16,13 @@ namespace cartservice
             string Value(string name) => (getEnv(name) ?? string.Empty).Trim();
 
             if (string.Equals(Value("OTEL_SDK_DISABLED"), "true", StringComparison.OrdinalIgnoreCase)
-                || Value("ENABLE_TRACING") == "0")
+               )
             {
                 return null;
             }
 
             string endpoint = Value("OTEL_EXPORTER_OTLP_ENDPOINT");
-            if (endpoint.Length > 0)
-            {
-                return HttpUri(endpoint);
-            }
-
-            string legacy = Value("COLLECTOR_SERVICE_ADDR");
-            return legacy.Length > 0 ? HttpUri($"http://{legacy}") : null;
+            return endpoint.Length > 0 ? HttpUri(endpoint) : null;
         }
 
         // An endpoint that is not an absolute http(s) URI ("foo", "alloy:4317" without the scheme) cannot be exported

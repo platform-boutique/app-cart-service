@@ -27,9 +27,9 @@ builder.Services.AddGrpc();
 builder.Services.AddGrpcReflection();
 
 // --- Traces, metrics and logs via OpenTelemetry, pushed over OTLP/gRPC (Alloy -> Tempo/Mimir/Loki) ---
-// Only when OTEL_EXPORTER_OTLP_ENDPOINT (scheme required, e.g. http://alloy:4317) or the legacy
-// COLLECTOR_SERVICE_ADDR (host:port) is set and non-empty; OTEL_SDK_DISABLED=true / ENABLE_TRACING=0 force it off
-// (see TelemetryConfig). Unset or empty means off: nothing is registered (an empty value used to crash startup).
+// Only when OTEL_EXPORTER_OTLP_ENDPOINT is an absolute http(s) URL (e.g. http://alloy:4317); OTEL_SDK_DISABLED=true
+// forces it off (see TelemetryConfig). Unset, empty or malformed means off: nothing is registered (an empty value
+// used to crash startup).
 Uri? otlpEndpoint = TelemetryConfig.OtlpEndpoint(Environment.GetEnvironmentVariable);
 if (otlpEndpoint is not null)
 {

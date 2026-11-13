@@ -18,7 +18,7 @@ namespace cartservice.tests
         public void EmptyEndpoint_IsOff_AndDoesNotThrow()
         {
             // Regression: an empty OTEL_EXPORTER_OTLP_ENDPOINT used to crash startup with new Uri("").
-            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", ""), ("COLLECTOR_SERVICE_ADDR", " "))));
+            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", ""))));
         }
 
         [Fact]
@@ -26,14 +26,23 @@ namespace cartservice.tests
             Assert.Equal(new Uri("http://alloy:4317"), TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"))));
 
         [Fact]
-        public void LegacyCollectorAddr_IsUsed() =>
-            Assert.Equal(new Uri("http://alloy:4317"), TelemetryConfig.OtlpEndpoint(Env(("COLLECTOR_SERVICE_ADDR", "alloy:4317"))));
+        public void LegacyCollectorAddr_IsIgnored() =>
+            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("COLLECTOR_SERVICE_ADDR", "alloy:4317"))));
 
         [Fact]
-        public void Endpoint_WinsOverLegacy() =>
+        public void Endpoint_IsNotAffectedByLegacyCollectorAddr() =>
             Assert.Equal(
                 new Uri("http://a:4317"),
                 TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://a:4317"), ("COLLECTOR_SERVICE_ADDR", "b:4317"))));
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("http://")]
+        [InlineData("ftp://alloy:4317")]
+        [InlineData("not a url")]
+        public void EmptyOrMalformed_IsOff_AndDoesNotThrow(string value) =>
+            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", value))));
 
         [Theory]
         [InlineData("true")]
@@ -58,7 +67,7 @@ namespace cartservice.tests
             Assert.Equal(new Uri("https://alloy:4317"), TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "https://alloy:4317"))));
 
         [Fact]
-        public void LegacyEnableTracing0_ForcesOff() =>
-            Assert.Null(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"), ("ENABLE_TRACING", "0"))));
+        public void LegacyEnableTracing0_IsIgnored() =>
+            Assert.NotNull(TelemetryConfig.OtlpEndpoint(Env(("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"), ("ENABLE_TRACING", "0"))));
     }
 }
