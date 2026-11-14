@@ -2,7 +2,7 @@
 
 | Signal | Implementation | Destination |
 |---|---|---|
-| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
+| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, plus a manual client span per Redis operation (`redis AddItem`/`GetCart`/`EmptyCart`, source `Everly.Cart`, `db.system.name=redis`, no ids on the span, errors recorded as status + exception event; the StackExchange.Redis instrumentation package is not used: it needs the connection multiplexer, which the cache client creates internally, so using it means owning the connection first), OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
 | **Metrics** | OpenTelemetry .NET: ASP.NET Core, Kestrel, gRPC server and runtime instrumentation, `PeriodicExportingMetricReader` over OTLP/gRPC every 15 s, plus `build_info{service,version,commit}`. Pushed over OTLP; there is no scrape endpoint | Alloy → Mimir |
 | **Logs** | One JSON object per line on stdout (below) **and** the OTel logging provider over OTLP/gRPC | Alloy → Loki |
 | **Profiles** | none: .NET has no continuous profiler (accepted exception to OBS-40) | — |

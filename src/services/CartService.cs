@@ -10,18 +10,21 @@ namespace cartservice.services
 
         public override async Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
         {
-            await store.AddItemAsync(request.UserId, request.Item.ProductId, request.Item.Quantity);
+            CartValidation.ValidateAddItem(request);
+            await store.AddItemAsync(request.UserId, request.Item.ProductId, request.Item.Quantity, context.CancellationToken);
             return Empty;
         }
 
         public override async Task<Cart> GetCart(GetCartRequest request, ServerCallContext context)
         {
-            return await store.GetCartAsync(request.UserId);
+            CartValidation.ValidateUserId(request.UserId);
+            return await store.GetCartAsync(request.UserId, context.CancellationToken);
         }
 
         public override async Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
         {
-            await store.EmptyCartAsync(request.UserId);
+            CartValidation.ValidateUserId(request.UserId);
+            await store.EmptyCartAsync(request.UserId, context.CancellationToken);
             return Empty;
         }
     }

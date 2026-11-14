@@ -62,6 +62,7 @@ namespace cartservice
                     _ = tracing
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
+                        .AddSource(cartservice.store.RedisCartStore.ActivitySourceName) // client spans for the Redis calls
                         .AddOtlpExporter(ConfigureOtlp);
                 })
                 .WithMetrics(metrics =>

@@ -42,6 +42,8 @@ static int Run(string[] args, ServiceIdentity identity)
     });
 
     // Register both the concrete type (for Redis health-check) and the abstraction (for CartService).
+    // Deadline for the Redis work of one RPC (REDIS_TIMEOUT_MS, default 2000 ms).
+    builder.Services.AddSingleton(CartStoreOptions.FromEnvironment(Environment.GetEnvironmentVariable));
     builder.Services.AddSingleton<RedisCartStore>();
     builder.Services.AddSingleton<ICartStore>(sp => sp.GetRequiredService<RedisCartStore>());
 
