@@ -15,15 +15,34 @@ RUN dotnet publish src/cartservice.csproj \
 # --- Stage 2: Run ---
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
+ARG SERVICE_VERSION=dev
+ARG SERVICE_COMMIT=unknown
+
+LABEL org.opencontainers.image.title="cart-service" \
+      org.opencontainers.image.source="https://github.com/platform-boutique/app-cart-service" \
+      org.opencontainers.image.revision="${SERVICE_COMMIT}" \
+      org.opencontainers.image.version="${SERVICE_VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# The base image's non-root user "app" has UID 1654: renumber it to 10001:10001 (IMG-02)
+RUN groupmod --gid 10001 app && usermod --uid 10001 --gid 10001 app
+
 WORKDIR /app
 
 COPY --from=builder /app/publish .
 
 ENV ASPNETCORE_HTTP_PORTS=7070 \
-    DOTNET_EnableDiagnostics=0
+    DOTNET_EnableDiagnostics=0 \
+    SERVICE_VERSION=${SERVICE_VERSION} \
+    SERVICE_COMMIT=${SERVICE_COMMIT}
 
 EXPOSE 7070
 
-USER app
+# Numeric so Kubernetes runAsNonRoot can verify it
+USER 10001:10001
+
+# The service has no healthcheck subcommand and the image has no nc/curl: TCP connect to the gRPC port with bash /dev/tcp
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/${ASPNETCORE_HTTP_PORTS:-7070}' || exit 1
 
 ENTRYPOINT ["./cartservice"]
