@@ -13,7 +13,7 @@ namespace cartservice.services
             HealthCheckRequest request, ServerCallContext context)
         {
             _logger.LogInformation("Health check called");
-            bool alive = await _store.PingAsync();
+            bool alive = await _store.PingAsync(context.CancellationToken);
             HealthCheckResponse.Types.ServingStatus status = alive
                 ? HealthCheckResponse.Types.ServingStatus.Serving
                 : HealthCheckResponse.Types.ServingStatus.NotServing;

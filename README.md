@@ -28,7 +28,18 @@ Package `hipstershop`, service `CartService` ([`src/protos/cart.proto`](src/prot
 | `GetCart` | `GetCartRequest{ user_id }` | `Cart{ user_id, repeated CartItem items }` | Returns the cart, or an empty cart if none exists |
 | `EmptyCart` | `EmptyCartRequest{ user_id }` | `Empty` | Overwrites the cart with an empty one |
 
-Errors: any Redis failure is returned as gRPC `FAILED_PRECONDITION` ("Can't access cart storage. …").
+Input rules (violations are `INVALID_ARGUMENT`; the message names the field and never echoes the value): `user_id` and `item.product_id` are non-empty (not only whitespace) and at most 128 characters; `item` is present; `item.quantity` is 1 to 100 per `AddItem` call; the total of one product in a cart is at most 1000 (`AddItem` beyond that is `INVALID_ARGUMENT` and writes nothing). The `GetCart`/`EmptyCart` calls need a non-empty `user_id` too.
+
+Errors from the storage layer carry a generic text, never the Redis exception (the detail is in the server log and on the span):
+
+| Situation | gRPC status | Text |
+|---|---|---|
+| Redis unreachable or failing | `UNAVAILABLE` | `cart storage unavailable` |
+| Redis did not answer within `REDIS_TIMEOUT_MS` | `DEADLINE_EXCEEDED` | `cart storage did not answer in time` |
+| The caller cancelled or its own deadline passed | `CANCELLED` | `request cancelled` |
+| Stored value cannot be parsed | `INTERNAL` | `internal error` |
+
+(Before this change every Redis failure was `FAILED_PRECONDITION` with the exception text appended.)
 
 ### Storage model
 
@@ -42,6 +53,7 @@ Errors: any Redis failure is returned as gRPC `FAILED_PRECONDITION` ("Can't acce
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `REDIS_ADDR` | **Yes** | — | StackExchange.Redis configuration string, e.g. `cart-redis:6379`. Unset: the process prints one JSON error line (`startup failed`) and exits with code 1. Extra options go after commas: `cart-redis:6379,password=<secret>,ssl=false` |
+| `REDIS_TIMEOUT_MS` | No | `2000` | Upper bound in milliseconds for the Redis work of ONE cart RPC (both round trips of `AddItem` together), 50 to 30000; the caller's own gRPC deadline still wins when it is shorter. Unset, empty, not a number or out of range means 2000 (a typo never removes the deadline). On expiry the RPC fails with `DEADLINE_EXCEEDED`. Covered by `RedisCartStoreFailureTests` |
 | `ASPNETCORE_ENVIRONMENT` | No | `Production` (in container) | Standard ASP.NET Core |
 | `Kestrel__Endpoints__Grpc__Url` | No | `http://0.0.0.0:7070` | Override the gRPC listener (standard .NET env-var-to-config mapping) |
 | `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`/`warning` or `error` (case-insensitive; anything else means `info`). Framework (`Microsoft.*`) categories stay at `warning` or above |
@@ -142,7 +154,7 @@ and was verified under the `restricted` Pod Security Standard on the earlier loc
 
 | Signal | Implementation | Destination |
 |---|---|---|
-| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
+| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, plus a manual client span per Redis operation (`redis AddItem`/`GetCart`/`EmptyCart`, source `Everly.Cart`, `db.system.name=redis`, no ids on the span, errors recorded as status + exception event; the StackExchange.Redis instrumentation package is not used: it needs the connection multiplexer, which the cache client creates internally, so using it means owning the connection first), OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
 | **Metrics** | OpenTelemetry .NET: ASP.NET Core, Kestrel, gRPC server and runtime instrumentation, `PeriodicExportingMetricReader` over OTLP/gRPC every 15 s, plus `build_info{service,version,commit}`. Pushed over OTLP; there is no scrape endpoint | Alloy → Mimir |
 | **Logs** | One JSON object per line on stdout (below) **and** the OTel logging provider over OTLP/gRPC | Alloy → Loki |
 | **Profiles** | none: .NET has no continuous profiler (accepted exception to OBS-40) | — |

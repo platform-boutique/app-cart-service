@@ -27,7 +27,7 @@ namespace cartservice.tests
                 new AddItemRequest { UserId = "u1", Item = new CartItem { ProductId = "p1", Quantity = 2 } },
                 FakeContext());
 
-            store.Verify(s => s.AddItemAsync("u1", "p1", 2), Times.Once);
+            store.Verify(s => s.AddItemAsync("u1", "p1", 2, It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -48,7 +48,7 @@ namespace cartservice.tests
         public async Task AddItem_StoreThrows_PropagatesRpcException()
         {
             Mock<ICartStore> store = new();
-            store.Setup(s => s.AddItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
+            store.Setup(s => s.AddItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                  .ThrowsAsync(new RpcException(new Status(StatusCode.FailedPrecondition, "storage error")));
 
             CartService svc = BuildService(store.Object);
@@ -70,7 +70,7 @@ namespace cartservice.tests
             expected.Items.Add(new CartItem { ProductId = "p1", Quantity = 3 });
 
             Mock<ICartStore> store = new();
-            store.Setup(s => s.GetCartAsync("u1")).ReturnsAsync(expected);
+            store.Setup(s => s.GetCartAsync("u1", It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
             CartService svc = BuildService(store.Object);
             Cart cart = await svc.GetCart(new GetCartRequest { UserId = "u1" }, FakeContext());
@@ -82,23 +82,10 @@ namespace cartservice.tests
         }
 
         [Fact]
-        public async Task GetCart_EmptyUserId_ReturnsEmptyCart()
-        {
-            Mock<ICartStore> store = new();
-            store.Setup(s => s.GetCartAsync("")).ReturnsAsync(new Cart { UserId = "" });
-
-            CartService svc = BuildService(store.Object);
-            Cart cart = await svc.GetCart(new GetCartRequest { UserId = "" }, FakeContext());
-
-            Assert.NotNull(cart);
-            Assert.Empty(cart.Items);
-        }
-
-        [Fact]
         public async Task GetCart_StoreThrows_PropagatesRpcException()
         {
             Mock<ICartStore> store = new();
-            store.Setup(s => s.GetCartAsync(It.IsAny<string>()))
+            store.Setup(s => s.GetCartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                  .ThrowsAsync(new RpcException(new Status(StatusCode.FailedPrecondition, "storage error")));
 
             CartService svc = BuildService(store.Object);
@@ -119,7 +106,7 @@ namespace cartservice.tests
 
             await svc.EmptyCart(new EmptyCartRequest { UserId = "u1" }, FakeContext());
 
-            store.Verify(s => s.EmptyCartAsync("u1"), Times.Once);
+            store.Verify(s => s.EmptyCartAsync("u1", It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]
@@ -138,7 +125,7 @@ namespace cartservice.tests
         public async Task EmptyCart_StoreThrows_PropagatesRpcException()
         {
             Mock<ICartStore> store = new();
-            store.Setup(s => s.EmptyCartAsync(It.IsAny<string>()))
+            store.Setup(s => s.EmptyCartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                  .ThrowsAsync(new RpcException(new Status(StatusCode.FailedPrecondition, "storage error")));
 
             CartService svc = BuildService(store.Object);

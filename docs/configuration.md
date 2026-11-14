@@ -3,6 +3,7 @@
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `REDIS_ADDR` | **Yes** | — | StackExchange.Redis configuration string, e.g. `cart-redis:6379`. Unset: the process prints one JSON error line (`startup failed`) and exits with code 1. Extra options go after commas: `cart-redis:6379,password=<secret>,ssl=false` |
+| `REDIS_TIMEOUT_MS` | No | `2000` | Upper bound in milliseconds for the Redis work of ONE cart RPC (both round trips of `AddItem` together), 50 to 30000; the caller's own gRPC deadline still wins when it is shorter. Unset, empty, not a number or out of range means 2000 (a typo never removes the deadline). On expiry the RPC fails with `DEADLINE_EXCEEDED`. Covered by `RedisCartStoreFailureTests` |
 | `ASPNETCORE_ENVIRONMENT` | No | `Production` (in container) | Standard ASP.NET Core |
 | `Kestrel__Endpoints__Grpc__Url` | No | `http://0.0.0.0:7070` | Override the gRPC listener (standard .NET env-var-to-config mapping) |
 | `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`/`warning` or `error` (case-insensitive; anything else means `info`). Framework (`Microsoft.*`) categories stay at `warning` or above |

@@ -33,9 +33,9 @@ namespace cartservice.tests.Integration
             RedisCartStore store = BuildStore();
             string userId = Guid.NewGuid().ToString();
 
-            await store.AddItemAsync(userId, "prod-1", 1);
+            await store.AddItemAsync(userId, "prod-1", 1, CancellationToken.None);
 
-            Hipstershop.Cart cart = await store.GetCartAsync(userId);
+            Hipstershop.Cart cart = await store.GetCartAsync(userId, CancellationToken.None);
             Assert.Single(cart.Items);
             Assert.Equal("prod-1", cart.Items[0].ProductId);
             Assert.Equal(1, cart.Items[0].Quantity);
@@ -49,10 +49,10 @@ namespace cartservice.tests.Integration
             RedisCartStore store = BuildStore();
             string userId = Guid.NewGuid().ToString();
 
-            await store.AddItemAsync(userId, "prod-1", 2);
-            await store.AddItemAsync(userId, "prod-1", 3);
+            await store.AddItemAsync(userId, "prod-1", 2, CancellationToken.None);
+            await store.AddItemAsync(userId, "prod-1", 3, CancellationToken.None);
 
-            Hipstershop.Cart cart = await store.GetCartAsync(userId);
+            Hipstershop.Cart cart = await store.GetCartAsync(userId, CancellationToken.None);
             Assert.Single(cart.Items);
             Assert.Equal(5, cart.Items[0].Quantity);
         }
@@ -65,10 +65,10 @@ namespace cartservice.tests.Integration
             RedisCartStore store = BuildStore();
             string userId = Guid.NewGuid().ToString();
 
-            await store.AddItemAsync(userId, "prod-1", 1);
-            await store.AddItemAsync(userId, "prod-2", 1);
+            await store.AddItemAsync(userId, "prod-1", 1, CancellationToken.None);
+            await store.AddItemAsync(userId, "prod-2", 1, CancellationToken.None);
 
-            Hipstershop.Cart cart = await store.GetCartAsync(userId);
+            Hipstershop.Cart cart = await store.GetCartAsync(userId, CancellationToken.None);
             Assert.Equal(2, cart.Items.Count);
         }
 
@@ -82,7 +82,7 @@ namespace cartservice.tests.Integration
             RedisCartStore store = BuildStore();
             string userId = Guid.NewGuid().ToString();
 
-            Hipstershop.Cart cart = await store.GetCartAsync(userId);
+            Hipstershop.Cart cart = await store.GetCartAsync(userId, CancellationToken.None);
 
             Assert.NotNull(cart);
             Assert.Empty(cart.Items);
@@ -98,11 +98,11 @@ namespace cartservice.tests.Integration
             RedisCartStore store = BuildStore();
             string userId = Guid.NewGuid().ToString();
 
-            await store.AddItemAsync(userId, "prod-1", 1);
-            await store.AddItemAsync(userId, "prod-2", 2);
-            await store.EmptyCartAsync(userId);
+            await store.AddItemAsync(userId, "prod-1", 1, CancellationToken.None);
+            await store.AddItemAsync(userId, "prod-2", 2, CancellationToken.None);
+            await store.EmptyCartAsync(userId, CancellationToken.None);
 
-            Hipstershop.Cart cart = await store.GetCartAsync(userId);
+            Hipstershop.Cart cart = await store.GetCartAsync(userId, CancellationToken.None);
             Assert.Empty(cart.Items);
         }
 
@@ -114,7 +114,7 @@ namespace cartservice.tests.Integration
             Skip.If(string.IsNullOrEmpty(RedisAddr), "REDIS_ADDR not set");
 
             RedisCartStore store = BuildStore();
-            Assert.True(await store.PingAsync());
+            Assert.True(await store.PingAsync(CancellationToken.None));
         }
     }
 }
