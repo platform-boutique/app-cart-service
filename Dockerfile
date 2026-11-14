@@ -1,5 +1,5 @@
 # --- Stage 1: Build ---
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS builder
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS builder
 
 WORKDIR /app
 
