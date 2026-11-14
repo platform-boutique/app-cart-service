@@ -8,15 +8,19 @@ namespace cartservice.tests
     /// </summary>
     internal sealed class TestServerCallContext : ServerCallContext
     {
-        private TestServerCallContext() { }
+        private readonly Metadata _requestHeaders;
 
-        public static ServerCallContext Create() => new TestServerCallContext();
+        private TestServerCallContext(Metadata requestHeaders) { _requestHeaders = requestHeaders; }
+
+        public static ServerCallContext Create() => new TestServerCallContext([]);
+
+        public static ServerCallContext Create(Metadata requestHeaders) => new TestServerCallContext(requestHeaders);
 
         protected override string MethodCore => "test";
         protected override string HostCore => "localhost";
         protected override string PeerCore => "localhost";
         protected override DateTime DeadlineCore => DateTime.MaxValue;
-        protected override Metadata RequestHeadersCore => [];
+        protected override Metadata RequestHeadersCore => _requestHeaders;
         protected override CancellationToken CancellationTokenCore => CancellationToken.None;
         protected override Metadata ResponseTrailersCore => [];
         protected override Status StatusCore

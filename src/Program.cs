@@ -1,88 +1,85 @@
 using cartservice;
 using cartservice.services;
 using cartservice.store;
-using OpenTelemetry.Exporter;
-using OpenTelemetry.Logs;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 
-WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-
-// --- Redis ---
-string redisAddr = Environment.GetEnvironmentVariable("REDIS_ADDR")
-    ?? throw new InvalidOperationException("REDIS_ADDR environment variable is not set.");
-
-builder.Services.AddStackExchangeRedisCache(options =>
+// Uncaught startup errors (missing REDIS_ADDR, port in use, ...) are one JSON line on stdout, exit code 1.
+ServiceIdentity identity = ServiceIdentity.FromProcess();
+try
 {
-    options.Configuration = redisAddr;
-});
-
-// Register both the concrete type (for Redis health-check) and the abstraction (for CartService).
-builder.Services.AddSingleton<RedisCartStore>();
-builder.Services.AddSingleton<ICartStore>(sp => sp.GetRequiredService<RedisCartStore>());
-
-// --- gRPC ---
-builder.Services.AddGrpc();
-builder.Services.AddGrpcReflection();
-
-// --- Traces, metrics and logs via OpenTelemetry, pushed over OTLP/gRPC (Alloy -> Tempo/Mimir/Loki) ---
-// Only when OTEL_EXPORTER_OTLP_ENDPOINT is an absolute http(s) URL (e.g. http://alloy:4317); OTEL_SDK_DISABLED=true
-// forces it off (see TelemetryConfig). Unset, empty or malformed means off: nothing is registered (an empty value
-// used to crash startup).
-Uri? otlpEndpoint = TelemetryConfig.OtlpEndpoint(Environment.GetEnvironmentVariable);
-if (otlpEndpoint is not null)
+    return Run(args, identity);
+}
+#pragma warning disable CA1031 // top-level catch-all: every startup failure becomes the same JSON line
+catch (Exception ex)
+#pragma warning restore CA1031
 {
-    string serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "cart-service";
-    string serviceVersion = Environment.GetEnvironmentVariable("SERVICE_VERSION") ?? "1.0.0";
-    // Distinguishes replicas: in Kubernetes the hostname is the pod name.
-    string serviceInstanceId = Environment.GetEnvironmentVariable("HOSTNAME") ?? Environment.MachineName;
-    int metricIntervalMs = int.TryParse(Environment.GetEnvironmentVariable("OTEL_METRIC_EXPORT_INTERVAL"), out int ms) ? ms : 15000;
-
-    void ConfigureOtlp(OtlpExporterOptions o)
-    {
-        o.Endpoint = otlpEndpoint;
-        o.Protocol = OtlpExportProtocol.Grpc;
-    }
-
-    _ = builder.Services.AddOpenTelemetry()
-        .ConfigureResource(r => r.AddService(serviceName, serviceVersion: serviceVersion, serviceInstanceId: serviceInstanceId))
-        .WithTracing(tracing =>
-        {
-            _ = tracing
-                .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation()
-                .AddOtlpExporter(ConfigureOtlp);
-        })
-        .WithMetrics(metrics =>
-        {
-            _ = metrics
-                .AddAspNetCoreInstrumentation()
-                .AddRuntimeInstrumentation()
-                .AddMeter("Grpc.AspNetCore.Server") // built-in gRPC server call metrics
-                .AddOtlpExporter((o, reader) =>
-                {
-                    ConfigureOtlp(o);
-                    reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = metricIntervalMs;
-                });
-        })
-        .WithLogging(logging =>
-        {
-            _ = logging.AddOtlpExporter(ConfigureOtlp);
-        });
+    JsonLog.WriteStartupError(ex, identity, Console.Out);
+    return 1;
 }
 
-// --- App ---
-WebApplication app = builder.Build();
+static int Run(string[] args, ServiceIdentity identity)
+{
+    WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-app.UseRouting();
-app.MapGrpcService<CartService>();
-app.MapGrpcService<HealthCheckService>();
-app.MapGrpcReflectionService();
-_ = app.MapGet("/", () => "cart-service gRPC — use a gRPC client to interact.");
+    // --- Logs: one JSON object per line on stdout, level from LOG_LEVEL (see JsonLog) ---
+    LogLevel logLevel = LogSettings.Level(Environment.GetEnvironmentVariable);
+    builder.Logging.ClearProviders();
+    _ = builder.Logging.AddConsoleFormatter<JsonLogFormatter, JsonLogFormatterOptions>(o => o.Identity = identity);
+    _ = builder.Logging.AddConsole(o => o.FormatterName = JsonLogFormatter.FormatterName);
+    _ = builder.Logging.SetMinimumLevel(logLevel);
+    _ = builder.Logging.AddFilter("Microsoft", logLevel < LogLevel.Warning ? LogLevel.Warning : logLevel);
+    _ = builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", logLevel);
 
-#pragma warning disable CA1848 // one line at startup; a LoggerMessage delegate is not worth it here
-app.Logger.LogInformation("Telemetry {State}", otlpEndpoint is null ? "off" : $"on (OTLP {otlpEndpoint})");
-#pragma warning restore CA1848
+    // SIGTERM: stop accepting, drain for at most this long, then flush telemetry (each export is bounded too): total < 10 s.
+    _ = builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TelemetryExtensions.ShutdownTimeout);
 
-app.Run();
+    // --- Redis ---
+    string redisAddr = Environment.GetEnvironmentVariable("REDIS_ADDR")
+        ?? throw new InvalidOperationException("REDIS_ADDR environment variable is not set.");
+
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisAddr;
+    });
+
+    // Register both the concrete type (for Redis health-check) and the abstraction (for CartService).
+    builder.Services.AddSingleton<RedisCartStore>();
+    builder.Services.AddSingleton<ICartStore>(sp => sp.GetRequiredService<RedisCartStore>());
+
+    // --- gRPC ---
+    builder.Services.AddGrpc(o => o.Interceptors.Add<RequestIdInterceptor>());
+    builder.Services.AddGrpcReflection();
+
+    // --- Traces, metrics and logs via OpenTelemetry, pushed over OTLP/gRPC (Alloy -> Tempo/Mimir/Loki) ---
+    // Only when OTEL_EXPORTER_OTLP_ENDPOINT is an absolute http(s) URL (e.g. http://alloy:4317); OTEL_SDK_DISABLED=true
+    // forces it off (see TelemetryConfig). Unset, empty or malformed means off: nothing is registered.
+    Uri? otlpEndpoint = TelemetryConfig.OtlpEndpoint(Environment.GetEnvironmentVariable);
+    if (otlpEndpoint is not null)
+    {
+        int metricIntervalMs = int.TryParse(Environment.GetEnvironmentVariable("OTEL_METRIC_EXPORT_INTERVAL"), out int ms) ? ms : 15000;
+        _ = builder.Services.AddEverlyTelemetry(identity, otlpEndpoint, metricIntervalMs);
+    }
+
+    // --- App ---
+    WebApplication app = builder.Build();
+
+    app.UseRouting();
+    app.MapGrpcService<CartService>();
+    app.MapGrpcService<HealthCheckService>();
+    app.MapGrpcReflectionService();
+    _ = app.MapGet("/", () => "cart-service gRPC — use a gRPC client to interact.");
+
+    // The "starting" line: version and commit (CODE-06) and whether telemetry is on.
+    app.Logger.Log(
+        LogLevel.Information,
+        default,
+        new KeyValuePair<string, object?>[]
+        {
+            new("commit", identity.Commit),
+            new("telemetry", otlpEndpoint is null ? "off" : $"on (OTLP {otlpEndpoint})"),
+        },
+        null,
+        static (_, _) => "starting");
+
+    app.Run();
+    return 0;
+}
