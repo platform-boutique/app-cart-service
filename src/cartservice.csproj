@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>cartservice</RootNamespace>
+    <!-- Placeholder: the build passes -p:Version=<real version>; ServiceIdentity maps this value to "dev". -->
+    <Version>0.0.0-dev</Version>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>

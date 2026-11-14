@@ -41,22 +41,27 @@ Errors: any Redis failure is returned as gRPC `FAILED_PRECONDITION` ("Can't acce
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `REDIS_ADDR` | **Yes** | — | StackExchange.Redis configuration string, e.g. `cart-redis:6379`. Process aborts at startup if unset. Extra options go after commas: `cart-redis:6379,password=<secret>,ssl=false` |
+| `REDIS_ADDR` | **Yes** | — | StackExchange.Redis configuration string, e.g. `cart-redis:6379`. Unset: the process prints one JSON error line (`startup failed`) and exits with code 1. Extra options go after commas: `cart-redis:6379,password=<secret>,ssl=false` |
 | `ASPNETCORE_ENVIRONMENT` | No | `Production` (in container) | Standard ASP.NET Core |
 | `Kestrel__Endpoints__Grpc__Url` | No | `http://0.0.0.0:7070` | Override the gRPC listener (standard .NET env-var-to-config mapping) |
-| `Logging__Console__FormatterName` | No | default (plain text) | Set to `json` for JSON console logs |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4317` | OTLP/**gRPC** endpoint for **traces, metrics and logs** (scheme required), e.g. `http://alloy.monitoring.svc.cluster.local:4317`. Legacy fallback: `COLLECTOR_SERVICE_ADDR` (`host:port`) |
+| `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn`/`warning` or `error` (case-insensitive; anything else means `info`). Framework (`Microsoft.*`) categories stay at `warning` or above |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | unset (telemetry off) | OTLP/**gRPC** endpoint for **traces, metrics and logs** (scheme required), e.g. `http://alloy.monitoring.svc.cluster.local:4317`. Telemetry is on only when this is an absolute http(s) URL; empty or malformed means off, never a crash (covered by `TelemetryConfigTests`). The legacy `COLLECTOR_SERVICE_ADDR` is removed. The `starting` log line says whether telemetry is on |
+| `OTEL_SDK_DISABLED` | No | — | `true` (trimmed, case-insensitive) forces telemetry off even with an endpoint set (the legacy `ENABLE_TRACING` is removed and ignored) |
 | `OTEL_METRIC_EXPORT_INTERVAL` | No | `15000` | Milliseconds between metric pushes |
-| `OTEL_SERVICE_NAME` | No | `cart-service` | `service.name` — becomes the Prometheus `job` and the Loki `service_name`; keep the default, dashboards depend on it |
-| `SERVICE_VERSION` | No | `1.0.0` | `service.version` resource attribute |
+| `OTEL_SERVICE_NAME` | No | `cart-service` | `service.name` (also the `service` field of every log line); keep the default, dashboards depend on it |
+| `SERVICE_VERSION` | No | assembly version, else `dev` | `service.version` and the `version` log field. Chain: `SERVICE_VERSION`, then the assembly informational version (set at build with `-p:Version=...`; the csproj placeholder `0.0.0-dev` counts as unset), then `dev` |
+| `SERVICE_COMMIT` | No | `unknown` | Commit id, logged in the `starting` line and the `commit` tag of `build_info`; set it at deploy time |
+| `DEPLOYMENT_ENVIRONMENT` | No | `local` | `deployment.environment` resource attribute |
+| `HOSTNAME` | No | machine name | `service.instance.id` (the pod name in Kubernetes) |
+| `PYROSCOPE_ADDR` | No | — | Accepted by the platform contract but **not used**: .NET has no continuous profiler (accepted exception, OBS-40) |
 
 Notes:
 
 - Ports are defined in [`src/appsettings.json`](src/appsettings.json): Kestrel `Grpc` = `Http2` on 7070. The image also sets `ASPNETCORE_HTTP_PORTS=7070`, but explicit Kestrel endpoints take precedence. There is no plain `PORT` variable.
-- There is **no profiling** (no Pyroscope integration).
+- There is **no profiling**: there is no continuous profiler for .NET, so `PYROSCOPE_ADDR` does nothing. This is a documented, accepted exception to OBS-40, not a gap to fix with a workaround.
 - Redis is connected to lazily on first use, so the process starts even if Redis is down — it just reports `NOT_SERVING` and fails RPCs until Redis is reachable.
-- Telemetry is **pushed**, not scraped: traces, metrics and logs share one OTLP/gRPC endpoint (Alloy); profiles go to Pyroscope (via Alloy). `service.instance.id` is the pod hostname, so replicas stay distinct in Mimir.
-- The former Prometheus endpoint (`METRICS_PORT`) no longer exists. Logs keep going to stdout and are additionally exported over OTLP with trace ids.
+- Telemetry is **pushed**, not scraped: traces, metrics and logs share one OTLP/gRPC endpoint (Alloy). There is no `/metrics` endpoint and no scrape port. `service.instance.id` is the pod hostname, so replicas stay distinct in Mimir.
+- Every OTLP export has a 2 s deadline and the host drains for at most 3 s on SIGTERM, so the process exits well within 10 s even when the collector accepts connections and never answers (measured, see [docs/observability.md](docs/observability.md)).
 
 ## Container image
 
@@ -68,9 +73,9 @@ Multi-stage [`Dockerfile`](Dockerfile):
 | runtime | `mcr.microsoft.com/dotnet/aspnet:10.0` | copies publish output, runs as `app` |
 
 - **Entrypoint:** `./cartservice` (working dir `/app`).
-- **User:** `app` — **UID/GID `1654`** (verified on the built image; set `runAsUser: 1654` for `runAsNonRoot`).
+- **User:** the base image's `app`, renumbered to **UID/GID `10001`** with `groupmod`/`usermod` (numeric `USER 10001:10001`, verified on the built image). Build args `SERVICE_VERSION` (default `dev`) and `SERVICE_COMMIT` (default `unknown`) set the OCI labels `version`/`revision` (plus `source`, `licenses=Apache-2.0`) and the ENV of the same names.
 - **ENV:** `ASPNETCORE_HTTP_PORTS=7070`, `DOTNET_EnableDiagnostics=0` (disables the diagnostics IPC socket, so no writable `/tmp` is needed for that).
-- **EXPOSE:** `7070`. **No `HEALTHCHECK`**, and the runtime image has no `curl`/`wget`, so exec probes are not an option — use `grpc:` or `tcpSocket`.
+- **EXPOSE:** `7070`. **`HEALTHCHECK`:** `bash -c 'exec 3<>/dev/tcp/127.0.0.1/${ASPNETCORE_HTTP_PORTS:-7070}'` (TCP connect; no `nc`/`curl`/`wget` in the image and no `healthcheck` subcommand, so it does not check Redis). Kubernetes: use `grpc:` or `tcpSocket`.
 - **Image size:** ~97 MB.
 - **Build context:** a root-level `.dockerignore` (added) excludes `bin/`, `obj/`, `tests/`, `.git`. The previous `src/.dockerignore` had no effect, and a host-built `src/obj` made the in-image `dotnet publish` fail with `NETSDK1064`.
 
@@ -108,7 +113,7 @@ livenessProbe:             # process-only
 ```yaml
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1654
+  runAsUser: 10001
   runAsGroup: 1654
   allowPrivilegeEscalation: false
   capabilities: { drop: ["ALL"] }
@@ -137,14 +142,24 @@ and was verified under the `restricted` Pod Security Standard on the earlier loc
 
 | Signal | Implementation | Destination |
 |---|---|---|
-| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, OTLP/gRPC exporter | Alloy `:4317` → Tempo |
-| **Metrics** | OpenTelemetry .NET: ASP.NET Core, Kestrel and runtime instrumentation, `PeriodicExportingMetricReader` over OTLP/gRPC every 15 s (replaces `prometheus-net`) | Alloy → Mimir |
-| **Logs** | `ILogger` console to stdout (plain text by default) **and** the OTel logging provider over OTLP/gRPC with trace ids | Alloy → Loki |
-| **Profiles** | none | — |
+| **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
+| **Metrics** | OpenTelemetry .NET: ASP.NET Core, Kestrel, gRPC server and runtime instrumentation, `PeriodicExportingMetricReader` over OTLP/gRPC every 15 s, plus `build_info{service,version,commit}`. Pushed over OTLP; there is no scrape endpoint | Alloy → Mimir |
+| **Logs** | One JSON object per line on stdout (below) **and** the OTel logging provider over OTLP/gRPC | Alloy → Loki |
+| **Profiles** | none: .NET has no continuous profiler (accepted exception to OBS-40) | — |
 
-Metric names the dashboard uses: `http_server_request_duration_seconds_{bucket,count,sum}` (labels `http_route` — e.g. `/hipstershop.CartService/AddItem` — `http_response_status_code`, `http_request_method`) and `http_server_active_requests`; plus `kestrel_*`, `aspnetcore_*` and `dotnet_*` runtime metrics. gRPC calls are HTTP/2 requests, so the per-method breakdown comes from `http_route`.
+**Log line shape** (same as the Go services): `timestamp` (RFC3339 UTC, microseconds), `severity` (`debug`, `info`, `warning`, `error`), `message`, `service`, `version`, then only when present `trace_id` and `span_id` (hex; taken from the current `Activity`, so they appear for lines written while a request is being handled and are absent otherwise), `request_id` (from an `x-request-id` gRPC header, none is sent today), `error` (`Type: message`, no stack trace) and the allow-listed `commit` and `telemetry` on the `starting` line. Anything else in the log state is dropped. An uncaught startup error is one JSON line on stdout (`startup failed`) and exit code 1.
 
-Every series carries `job="cart-service"` (from `service.name`) and `instance=<pod name>` (`service.instance.id`), which is what the Grafana dashboards select on. Logs land in Loki with `service_name="cart-service"` and trace/span ids, so a log line links to its trace.
+```json
+{"timestamp":"2026-11-14T00:13:05.270351Z","severity":"info","message":"starting","service":"cart-service","version":"9.9.9","commit":"abc1234","telemetry":"on (OTLP http://127.0.0.1:14317/)"}
+```
+
+Every signal carries `service.name`, `service.version`, `service.namespace=everly`, `deployment.environment` and `service.instance.id`. `build_info` is a gauge with the value 1.
+
+Metric names the dashboard uses: `http_server_request_duration_seconds_{bucket,count,sum}` (labels `http_route` — e.g. `/hipstershop.CartService/AddItem` — `http_response_status_code`, `http_request_method`) and `http_server_active_requests`; plus `kestrel_*`, `aspnetcore_*` and `dotnet_*` runtime metrics. gRPC calls are HTTP/2 requests, so the per-method breakdown comes from `http_route`. The names differ from the Go services (`grpc_server_*`); dashboards use the Tempo span metrics for cross-language panels.
+
+Every series carries `job="cart-service"` (from `service.name`) and `instance=<pod name>` (`service.instance.id`), which is what the Grafana dashboards select on. Logs land in Loki with `service_name="cart-service"`; the `trace_id` in the stdout line links to the trace in Tempo.
+
+Logging what: the per-call lines log the cart owner's `userId` (an anonymous session id, not an email or name) and product ids; no card data, credentials or tokens pass through this service.
 
 ## Running locally
 
@@ -181,8 +196,12 @@ grpcurl -plaintext localhost:7070 grpc.health.v1.Health/Check   # NOT_SERVING if
 
 ```
 ├── src/
-│   ├── Program.cs                 # DI, Redis cache, gRPC + reflection, OTel (traces/metrics/logs), endpoints
-│   ├── appsettings.json           # Kestrel endpoints (7070 h2, 9090 h1) + log levels
+│   ├── Program.cs                 # DI, Redis cache, gRPC + reflection, JSON logs, OTel (traces/metrics/logs), endpoints
+│   ├── JsonLog.cs, JsonLogFormatter.cs  # the one stdout log shape (OBS-30)
+│   ├── ServiceIdentity.cs         # name, version chain, commit, environment, instance id
+│   ├── TelemetryConfig.cs, TelemetryExtensions.cs  # OTLP on/off contract, resource, build_info, export deadlines
+│   ├── RequestIdInterceptor.cs    # x-request-id -> logging scope
+│   ├── appsettings.json           # Kestrel endpoints (7070 h2); log level comes from LOG_LEVEL
 │   ├── cartservice.csproj         # net10.0, TreatWarningsAsErrors, package refs
 │   ├── protos/cart.proto          # service contract
 │   ├── services/

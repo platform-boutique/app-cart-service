@@ -35,8 +35,12 @@ grpcurl -plaintext localhost:7070 grpc.health.v1.Health/Check   # NOT_SERVING if
 
 ```
 ├── src/
-│   ├── Program.cs                 # DI, Redis cache, gRPC + reflection, OTel (traces/metrics/logs), endpoints
-│   ├── appsettings.json           # Kestrel endpoints (7070 h2, 9090 h1) + log levels
+│   ├── Program.cs                 # DI, Redis cache, gRPC + reflection, JSON logs, OTel (traces/metrics/logs), endpoints
+│   ├── JsonLog.cs, JsonLogFormatter.cs  # the one stdout log shape (OBS-30)
+│   ├── ServiceIdentity.cs         # name, version chain, commit, environment, instance id
+│   ├── TelemetryConfig.cs, TelemetryExtensions.cs  # OTLP on/off contract, resource, build_info, export deadlines
+│   ├── RequestIdInterceptor.cs    # x-request-id -> logging scope
+│   ├── appsettings.json           # Kestrel endpoints (7070 h2); log level comes from LOG_LEVEL
 │   ├── cartservice.csproj         # net10.0, TreatWarningsAsErrors, package refs
 │   ├── protos/cart.proto          # service contract
 │   ├── services/

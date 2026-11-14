@@ -12,3 +12,25 @@
 ## OS files
 .DS_Store
 Thumbs.db
+# Environment files, key material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Test output, TechDocs build output
+TestResults/
+coverage*/
+*.trx
+/site/
+.venv/
+
+# IDE (Rider)
+*.DotSettings.user
+
+# Agent / session notes: never committed
+STATUS.md
+NOTES*.md
+PLAN.md
+.claude/
