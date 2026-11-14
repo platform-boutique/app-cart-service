@@ -13,7 +13,7 @@ RUN dotnet publish src/cartservice.csproj \
     --no-restore
 
 # --- Stage 2: Run ---
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:11.0
 
 WORKDIR /app
 
