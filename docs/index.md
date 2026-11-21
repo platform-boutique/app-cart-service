@@ -17,6 +17,8 @@ A gRPC service that manages shopping carts for the platform-demo e-commerce plat
 
 Called by `frontend`, `checkout-service`. It calls `cart-redis`.
 
+Pages: [architecture](architecture.md), [API](api.md), [configuration](configuration.md), [observability](observability.md), [operations](operations.md), [development](development.md), [decisions](adr/0001-redis-cart-without-ttl.md).
+
 ```mermaid
 flowchart LR
   cart_service["<b>cart-service</b><br/>7070 (gRPC)"]:::me
