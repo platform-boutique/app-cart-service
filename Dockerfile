@@ -3,8 +3,9 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS builder
 
 WORKDIR /app
 
-COPY src/cartservice.csproj ./src/
-RUN dotnet restore src/cartservice.csproj
+COPY src/cartservice.csproj src/packages.lock.json ./src/
+# Locked mode (SEC-01): fails when the resolved packages differ from packages.lock.json
+RUN dotnet restore --locked-mode src/cartservice.csproj
 
 COPY src/ ./src/
 RUN dotnet publish src/cartservice.csproj \

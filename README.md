@@ -192,6 +192,8 @@ docker run --rm --network host -e REDIS_ADDR=localhost:6379 cart-service:local
 dotnet test tests/cartservice.tests.csproj
 ```
 
+NuGet packages are locked (`src/packages.lock.json`, `tests/packages.lock.json`, SEC-01). CI (`CI=true`) and the Dockerfile restore in locked mode, so a resolution that differs from the lock files fails the build. After changing a package version, run `dotnet restore cartservice.sln` locally (with `CI` unset) and commit the changed lock files.
+
 ### Manual gRPC testing (reflection is on)
 
 ```bash
