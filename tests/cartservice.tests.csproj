@@ -9,6 +9,11 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Reproducible restore (SEC-01): packages.lock.json is committed. CI (CI=true) and the Dockerfile
+         restore in locked mode, so a resolution that differs from the lock file fails the build.
+         To change a package: edit the version, run `dotnet restore` locally (CI unset) and commit the changed lock files. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 
   <!-- Reference the main service project so tests can use its types -->
