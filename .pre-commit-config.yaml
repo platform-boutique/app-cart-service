@@ -1,8 +1,9 @@
-# Local secret blocking. One-time setup per clone:  pipx install pre-commit && pre-commit install
-# - every commit: gitleaks scans the staged changes, plus private-key / large-file checks
-# - every push:   gitleaks scans the commits being pushed before anything leaves the machine
-# This is a fast local guard (git push --no-verify skips it); GitHub push protection and the
-# CI secret scan are the enforcing layers.
+# Local guard that runs the same checks as CI. One-time setup per clone:  pipx install pre-commit && pre-commit install
+# - every commit: gitleaks scans the staged changes, private-key / large-file checks, dotnet format
+# - every push:   gitleaks scans the commits being pushed, dotnet build with analyzers as errors
+# Format and lint use the same tools and pinned versions as the shared CI workflow (platform-demo-workflows), so a clean
+# local run means the `Lint & Format` job passes. This is a fast local guard (git push --no-verify skips it); the CI jobs,
+# GitHub push protection and the CI secret scan are the enforcing layers.
 default_install_hook_types: [pre-commit, pre-push]
 
 repos:
@@ -22,6 +23,21 @@ repos:
 
   - repo: local
     hooks:
+      # Need the .NET SDK; the same commands as the CI `Lint & Format` job.
+      - id: dotnet-format
+        name: dotnet format --verify-no-changes (as CI)
+        language: system
+        entry: bash -c 'dotnet tool restore && dotnet format --verify-no-changes --verbosity diagnostic'
+        types: [c#]
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: dotnet-build-analyzers
+        name: dotnet build /warnaserror (Roslyn analyzers, as CI)
+        language: system
+        entry: dotnet build cartservice.sln --configuration Release /warnaserror
+        types: [c#]
+        pass_filenames: false
+        stages: [pre-push]
       - id: gitleaks-push
         name: gitleaks (commits being pushed)
         language: golang
