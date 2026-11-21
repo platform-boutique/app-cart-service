@@ -32,8 +32,8 @@ livenessProbe:             # process-only
 ```yaml
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1654
-  runAsGroup: 1654
+  runAsUser: 10001
+  runAsGroup: 10001
   allowPrivilegeEscalation: false
   capabilities: { drop: ["ALL"] }
   readOnlyRootFilesystem: true   # verified in-cluster; no writable /tmp was needed
