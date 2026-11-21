@@ -6,13 +6,18 @@ repo_url: https://github.com/platform-boutique/app-cart-service
 edit_uri: edit/main/docs/
 nav:
   - Overview: index.md
+  - Architecture: architecture.md
   - API: api.md
   - Configuration: configuration.md
   - Container image: container-image.md
   - Kubernetes: kubernetes.md
   - Observability: observability.md
+  - Operations: operations.md
   - Develop & test: development.md
   - Known limitations: limitations.md
+  - Decisions:
+      - "1. Redis carts, no TTL": adr/0001-redis-cart-without-ttl.md
+      - "2. No continuous profiler": adr/0002-no-continuous-profiler.md
 theme:
   name: material
   features:
