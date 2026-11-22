@@ -70,7 +70,7 @@ static int Run(string[] args, ServiceIdentity identity)
     app.MapGrpcReflectionService();
     _ = app.MapGet("/", () => "cart-service gRPC — use a gRPC client to interact.");
 
-    // The "starting" line: version and commit (CODE-06) and whether telemetry is on.
+    // The "starting" line: version and commit (CODE-06) and whether telemetry and profiling are on.
     app.Logger.Log(
         LogLevel.Information,
         default,
@@ -78,6 +78,7 @@ static int Run(string[] args, ServiceIdentity identity)
         {
             new("commit", identity.Commit),
             new("telemetry", otlpEndpoint is null ? "off" : $"on (OTLP {otlpEndpoint})"),
+            new("profiling", ProfilingConfig.Describe(Environment.GetEnvironmentVariable)),
         },
         null,
         static (_, _) => "starting");

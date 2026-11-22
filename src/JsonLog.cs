@@ -25,6 +25,8 @@ namespace cartservice
                 ["Port"] = "port",
                 ["telemetry"] = "telemetry",
                 ["Telemetry"] = "telemetry",
+                ["profiling"] = "profiling",
+                ["Profiling"] = "profiling",
             };
 
         public static string Severity(LogLevel level) => level switch
