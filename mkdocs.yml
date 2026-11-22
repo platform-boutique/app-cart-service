@@ -17,7 +17,8 @@ nav:
   - Known limitations: limitations.md
   - Decisions:
       - "1. Redis carts, no TTL": adr/0001-redis-cart-without-ttl.md
-      - "2. No continuous profiler": adr/0002-no-continuous-profiler.md
+      - "2. Profiling with the Pyroscope .NET profiler": adr/0002-profiling-with-the-pyroscope-dotnet-profiler.md
+      - "3. Proto package stays hipstershop": adr/0003-proto-package-stays-hipstershop.md
 theme:
   name: material
   features:

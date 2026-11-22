@@ -15,12 +15,17 @@
 | `SERVICE_COMMIT` | No | `unknown` | Commit id, logged in the `starting` line and the `commit` tag of `build_info`; set it at deploy time |
 | `DEPLOYMENT_ENVIRONMENT` | No | `local` | `deployment.environment` resource attribute |
 | `HOSTNAME` | No | machine name | `service.instance.id` (the pod name in Kubernetes) |
-| `PYROSCOPE_ADDR` | No | — | Accepted by the platform contract but **not used**: .NET has no continuous profiler (accepted exception, OBS-40) |
+| `PYROSCOPE_ADDR` | No | unset (profiling off) | Pyroscope server URL, e.g. `http://pyroscope:4040`. Continuous profiling with the Grafana Pyroscope .NET profiler is on only when this is an absolute http(s) URL with a host; empty or malformed means off, never a startup failure. `OTEL_SDK_DISABLED=true` and `ENABLE_PROFILING=0` force it off; `ENABLE_PROFILING=1` alone starts nothing. The image entrypoint decides before the runtime starts ([ADR 2](adr/0002-profiling-with-the-pyroscope-dotnet-profiler.md)); the `starting` log line has a `profiling` field |
+| `ENABLE_PROFILING` | No | — | `0` forces profiling off even with `PYROSCOPE_ADDR` set (same as the other services) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | No | `grpc` | Fixed: the exporters are configured in code for OTLP/gRPC (`OtlpExportProtocol.Grpc`), so another value has no effect |
+| `OTEL_RESOURCE_ATTRIBUTES` | No | — | Not read by service code. The resource is the fixed set of OBS-02 (below); extra `key=value` pairs are only what the OpenTelemetry .NET SDK itself adds from this variable (not tested here) |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | No | — | Not read by service code and no sampler is configured: the OpenTelemetry .NET SDK default applies (parent-based, always on; not tested here) |
 
 Notes:
 
 - Ports are defined in [`src/appsettings.json`](https://github.com/platform-boutique/app-cart-service/blob/main/src/appsettings.json): Kestrel `Grpc` = `Http2` on 7070. The image also sets `ASPNETCORE_HTTP_PORTS=7070`, but explicit Kestrel endpoints take precedence. There is no plain `PORT` variable.
-- There is **no profiling**: there is no continuous profiler for .NET, so `PYROSCOPE_ADDR` does nothing. This is a documented, accepted exception to OBS-40, not a gap to fix with a workaround.
+- Profiling is a native CLR profiler (Grafana Pyroscope .NET profiler 1.6.1, installed in `/opt/pyroscope` of the image). It is loaded only when `container/entrypoint.sh` sees a valid `PYROSCOPE_ADDR`; a plain `dotnet run` never loads it. Application name `OTEL_SERVICE_NAME`, labels `service_name`, `version`, `environment`. CPU profiles only. See [Observability](observability.md).
+- The profiler's own diagnostics go to a rotating log file in `/tmp` (`DD_TRACE_LOG_DIRECTORY`), not to stdout or stderr, so the service log stays one JSON object per line (`PYROSCOPE_LOG_STDERR=true` prints them on stderr when debugging). With a read-only root filesystem and no writable `/tmp` the profiler runs without a log file; the service and the profile upload are not affected (run on 2026-11-22, see [Observability](observability.md)).
 - Redis is connected to lazily on first use, so the process starts even if Redis is down — it just reports `NOT_SERVING` and fails RPCs until Redis is reachable.
 - Telemetry is **pushed**, not scraped: traces, metrics and logs share one OTLP/gRPC endpoint (Alloy). There is no `/metrics` endpoint and no scrape port. `service.instance.id` is the pod hostname, so replicas stay distinct in Mimir.
 - Every OTLP export has a 2 s deadline and the host drains for at most 3 s on SIGTERM, so the process exits well within 10 s even when the collector accepts connections and never answers (measured, see [Observability](observability.md)).
