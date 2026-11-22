@@ -65,10 +65,10 @@ EXPOSE 7070
 # Numeric so Kubernetes runAsNonRoot can verify it
 USER 10001:10001
 
-# The service has no healthcheck subcommand and the image has no nc/curl: TCP connect to the gRPC port with bash /dev/tcp
-# (exec form; bash expands the port itself). The profiler is not loaded here: CORECLR_* are set only inside the entrypoint.
+# `cartservice healthcheck` is a TCP connect to the gRPC port (CODE-03: no shell, nc or curl needed; it does not check Redis).
+# It runs the binary directly, not through the entrypoint, so the profiler is never loaded into the probe.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${ASPNETCORE_HTTP_PORTS:-7070}"]
+    CMD ["/app/cartservice", "healthcheck"]
 
 # Decides before the runtime starts whether the Pyroscope profiler is loaded (PYROSCOPE_ADDR), then execs ./cartservice
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -58,6 +58,7 @@ grpcurl -plaintext localhost:7070 grpc.health.v1.Health/Check   # NOT_SERVING if
 │   ├── JsonLog.cs, JsonLogFormatter.cs  # the one stdout log shape (OBS-30)
 │   ├── ServiceIdentity.cs         # name, version chain, commit, environment, instance id
 │   ├── TelemetryConfig.cs, TelemetryExtensions.cs  # OTLP on/off contract, resource, build_info, export deadlines
+│   ├── HealthProbe.cs             # `cartservice healthcheck` (container HEALTHCHECK, TCP connect)
 │   ├── ProfilingConfig.cs         # PYROSCOPE_ADDR rule as a function (the "starting" line); the entrypoint applies the same rule
 │   ├── RequestIdInterceptor.cs    # x-request-id -> logging scope
 │   ├── appsettings.json           # Kestrel endpoints (7070 h2); log level comes from LOG_LEVEL

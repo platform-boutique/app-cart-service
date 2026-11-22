@@ -2,6 +2,12 @@ using cartservice;
 using cartservice.services;
 using cartservice.store;
 
+// `cartservice healthcheck` is the container HEALTHCHECK: a TCP connect to the gRPC port, no host, no telemetry.
+if (args is [HealthProbe.Command])
+{
+    return HealthProbe.Run(HealthProbe.Port(Environment.GetEnvironmentVariable), HealthProbe.Timeout);
+}
+
 // Uncaught startup errors (missing REDIS_ADDR, port in use, ...) are one JSON line on stdout, exit code 1.
 ServiceIdentity identity = ServiceIdentity.FromProcess();
 try

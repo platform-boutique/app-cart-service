@@ -39,6 +39,7 @@ Both Redis round trips of one `AddItem` share the budget `REDIS_TIMEOUT_MS` (def
 | `src/store/` | `ICartStore` and the `IDistributedCache`-backed `RedisCartStore`, the timeout option |
 | `container/entrypoint.sh`, `src/ProfilingConfig.cs` | the image entrypoint that loads the Pyroscope .NET profiler only when `PYROSCOPE_ADDR` is valid, and the same rule as a C# function for the `starting` log line |
 | `src/JsonLog*.cs`, `ServiceIdentity.cs`, `TelemetryConfig.cs`, `TelemetryExtensions.cs`, `RequestIdInterceptor.cs` | one JSON log shape, service identity, telemetry contract and export deadlines, request id into the logging scope |
+| `src/HealthProbe.cs` | `cartservice healthcheck`: the container HEALTHCHECK (TCP connect, no shell needed) |
 | `src/protos/cart.proto` | the service contract (package `hipstershop`) |
 
 ## Decisions
