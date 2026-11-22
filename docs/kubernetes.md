@@ -49,7 +49,7 @@ resources:
 
 **Config / secrets:** `REDIS_ADDR` is not secret while Redis has no password. If you add auth, put the *whole* `REDIS_ADDR` string (it embeds `password=…`) in a `Secret` and use `secretKeyRef`.
 
-**Telemetry:** pushed, not scraped — OTLP/gRPC to Alloy (`global.monitoring.otlpEndpoint`); no profiler. Metrics carry `job="cart-service"` and `instance=<pod>`; no scrape annotations or `ServiceMonitor` are needed.
+**Telemetry:** pushed, not scraped — OTLP/gRPC to Alloy (`global.monitoring.otlpEndpoint`); profiles are pushed to Pyroscope (`PYROSCOPE_ADDR`, off when unset; the Pyroscope .NET profiler loaded by the image entrypoint). Metrics carry `job="cart-service"` and `instance=<pod>`; no scrape annotations or `ServiceMonitor` are needed.
 
 **Helm chart:** [`platform-demo-helm/cart-service`](https://github.com/platform-boutique/platform-demo-helm/tree/main/cart-service) (built on the shared `platform-common` library chart). It ships with HA defaults — 2 replicas,
 HPA, PodDisruptionBudget, topology spread, NetworkPolicy, restricted pod security context, probes and the full env contract (see Configuration) —

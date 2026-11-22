@@ -65,12 +65,17 @@ Errors from the storage layer carry a generic text, never the Redis exception (t
 | `SERVICE_COMMIT` | No | `unknown` | Commit id, logged in the `starting` line and the `commit` tag of `build_info`; set it at deploy time |
 | `DEPLOYMENT_ENVIRONMENT` | No | `local` | `deployment.environment` resource attribute |
 | `HOSTNAME` | No | machine name | `service.instance.id` (the pod name in Kubernetes) |
-| `PYROSCOPE_ADDR` | No | — | Accepted by the platform contract but **not used**: .NET has no continuous profiler (accepted exception, OBS-40) |
+| `PYROSCOPE_ADDR` | No | unset (profiling off) | Pyroscope server URL, e.g. `http://pyroscope:4040`. Continuous profiling with the Grafana Pyroscope .NET profiler is on only when this is an absolute http(s) URL with a host; empty or malformed means off, never a startup failure. `OTEL_SDK_DISABLED=true` and `ENABLE_PROFILING=0` force it off; `ENABLE_PROFILING=1` alone starts nothing. The image entrypoint decides before the runtime starts ([ADR 2](docs/adr/0002-profiling-with-the-pyroscope-dotnet-profiler.md)); the `starting` log line has a `profiling` field |
+| `ENABLE_PROFILING` | No | — | `0` forces profiling off even with `PYROSCOPE_ADDR` set (same as the other services) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | No | `grpc` | Fixed: the exporters are configured in code for OTLP/gRPC (`OtlpExportProtocol.Grpc`), so another value has no effect |
+| `OTEL_RESOURCE_ATTRIBUTES` | No | — | Not read by service code. The resource is the fixed set of OBS-02 (below); extra `key=value` pairs are only what the OpenTelemetry .NET SDK itself adds from this variable (not tested here) |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | No | — | Not read by service code and no sampler is configured: the OpenTelemetry .NET SDK default applies (parent-based, always on; not tested here) |
 
 Notes:
 
 - Ports are defined in [`src/appsettings.json`](src/appsettings.json): Kestrel `Grpc` = `Http2` on 7070. The image also sets `ASPNETCORE_HTTP_PORTS=7070`, but explicit Kestrel endpoints take precedence. There is no plain `PORT` variable.
-- There is **no profiling**: there is no continuous profiler for .NET, so `PYROSCOPE_ADDR` does nothing. This is a documented, accepted exception to OBS-40, not a gap to fix with a workaround.
+- Profiling is a native CLR profiler (Grafana Pyroscope .NET profiler 1.6.1, installed in `/opt/pyroscope` of the image). It is loaded only when `container/entrypoint.sh` sees a valid `PYROSCOPE_ADDR`; a plain `dotnet run` never loads it. Application name `OTEL_SERVICE_NAME`, labels `service_name`, `version`, `environment`. CPU profiles only. See [Observability](docs/observability.md).
+- The profiler's own diagnostics go to a rotating log file in `/tmp` (`DD_TRACE_LOG_DIRECTORY`), not to stdout or stderr, so the service log stays one JSON object per line (`PYROSCOPE_LOG_STDERR=true` prints them on stderr when debugging). With a read-only root filesystem and no writable `/tmp` the profiler runs without a log file; the service and the profile upload are not affected (run on 2026-11-22, see [Observability](docs/observability.md)).
 - Redis is connected to lazily on first use, so the process starts even if Redis is down — it just reports `NOT_SERVING` and fails RPCs until Redis is reachable.
 - Telemetry is **pushed**, not scraped: traces, metrics and logs share one OTLP/gRPC endpoint (Alloy). There is no `/metrics` endpoint and no scrape port. `service.instance.id` is the pod hostname, so replicas stay distinct in Mimir.
 - Every OTLP export has a 2 s deadline and the host drains for at most 3 s on SIGTERM, so the process exits well within 10 s even when the collector accepts connections and never answers (measured, see [docs/observability.md](docs/observability.md)).
@@ -82,13 +87,14 @@ Multi-stage [`Dockerfile`](Dockerfile):
 | Stage | Base | What happens |
 |---|---|---|
 | builder | `mcr.microsoft.com/dotnet/sdk:10.0` | `dotnet restore` (csproj only, for layer caching), then `dotnet publish -c Release` |
-| runtime | `mcr.microsoft.com/dotnet/aspnet:10.0` | copies publish output, runs as `app` |
+| profiler | `mcr.microsoft.com/dotnet/sdk:10.0` | downloads the Grafana Pyroscope .NET profiler 1.6.1 (glibc x86_64) with `ADD --checksum`, keeps the two libraries and strips their debug info (build stage only) |
+| runtime | `mcr.microsoft.com/dotnet/aspnet:10.0` | copies the publish output, the profiler libraries (`/opt/pyroscope`) and `container/entrypoint.sh`, runs as `app` |
 
-- **Entrypoint:** `./cartservice` (working dir `/app`).
+- **Entrypoint:** `/app/entrypoint.sh` (exec form), which execs `./cartservice` (working dir `/app`). It decides before the .NET runtime starts whether the Pyroscope profiler is loaded: only when `PYROSCOPE_ADDR` is a valid http(s) URL (see [ADR 2](docs/adr/0002-profiling-with-the-pyroscope-dotnet-profiler.md)). With profiling off it changes nothing.
 - **User:** the base image's `app`, renumbered to **UID/GID `10001`** with `groupmod`/`usermod` (numeric `USER 10001:10001`, verified on the built image). Build args `SERVICE_VERSION` (default `dev`) and `SERVICE_COMMIT` (default `unknown`) set the OCI labels `version`/`revision` (plus `source`, `licenses=Apache-2.0`) and the ENV of the same names.
-- **ENV:** `ASPNETCORE_HTTP_PORTS=7070`, `DOTNET_EnableDiagnostics=0` (disables the diagnostics IPC socket, so no writable `/tmp` is needed for that).
-- **EXPOSE:** `7070`. **`HEALTHCHECK`:** `bash -c 'exec 3<>/dev/tcp/127.0.0.1/${ASPNETCORE_HTTP_PORTS:-7070}'` (TCP connect; no `nc`/`curl`/`wget` in the image and no `healthcheck` subcommand, so it does not check Redis). Kubernetes: use `grpc:` or `tcpSocket`.
-- **Image size:** ~97 MB.
+- **ENV:** `ASPNETCORE_HTTP_PORTS=7070`, `DOTNET_EnableDiagnostics=0` (disables the diagnostics IPC socket, so no writable `/tmp` is needed for that; it also disables profilers, so the entrypoint sets `DOTNET_EnableDiagnostics=1` with `_IPC=0`, `_Debugger=0`, `_Profiler=1` for the service process when profiling is on). No `CORECLR_*` variable is set in the image: the profiler is loaded only through the entrypoint, so the healthcheck and `docker exec` shells never load it.
+- **EXPOSE:** `7070`. **`HEALTHCHECK`** (exec form): `["/app/cartservice", "healthcheck"]`, a subcommand of the service binary that does a TCP connect to `127.0.0.1:${ASPNETCORE_HTTP_PORTS:-7070}` (3 s timeout, exit 0 or 1; no shell, `nc`, `curl` or `wget` needed, and it does not check Redis). It runs the binary directly, not through the entrypoint, so the profiler is never loaded into the probe. Kubernetes: use `grpc:` or `tcpSocket`.
+- **Image size** (`docker image inspect`, 2026-11-22): 110.4 MB with the profiler (`docker images` content size 110 MB, disk usage 387 MB), 105.4 MB (disk 369 MB) for the same code without the profiler stage, so the profiler adds 4.9 MB by that measure and 18 MB by `docker images` disk usage (two stripped libraries of 12.8 MB and 35 KB, plus the entrypoint). The runtime base is `mcr.microsoft.com/dotnet/aspnet:10.0` pinned by digest (Ubuntu 24.04 based, glibc).
 - **Build context:** a root-level `.dockerignore` (added) excludes `bin/`, `obj/`, `tests/`, `.git`. The previous `src/.dockerignore` had no effect, and a host-built `src/obj` made the in-image `dotnet publish` fail with `NETSDK1064`.
 
 ## Kubernetes deployment notes
@@ -142,7 +148,7 @@ resources:
 
 **Config / secrets:** `REDIS_ADDR` is not secret while Redis has no password. If you add auth, put the *whole* `REDIS_ADDR` string (it embeds `password=…`) in a `Secret` and use `secretKeyRef`.
 
-**Telemetry:** pushed, not scraped — OTLP/gRPC to Alloy (`global.monitoring.otlpEndpoint`); no profiler. Metrics carry `job="cart-service"` and `instance=<pod>`; no scrape annotations or `ServiceMonitor` are needed.
+**Telemetry:** pushed, not scraped — OTLP/gRPC to Alloy (`global.monitoring.otlpEndpoint`); profiles are pushed to Pyroscope (`PYROSCOPE_ADDR`, off when unset; the Pyroscope .NET profiler loaded by the image entrypoint). Metrics carry `job="cart-service"` and `instance=<pod>`; no scrape annotations or `ServiceMonitor` are needed.
 
 **Helm chart:** [`platform-demo-helm/cart-service`](https://github.com/platform-boutique/platform-demo-helm/tree/main/cart-service) (built on the shared `platform-common` library chart). It ships with HA defaults — 2 replicas,
 HPA, PodDisruptionBudget, topology spread, NetworkPolicy, restricted pod security context, probes and the full env contract (see Configuration) —
@@ -157,12 +163,12 @@ and was verified under the `restricted` Pod Security Standard on the earlier loc
 | **Traces** | OpenTelemetry .NET: ASP.NET Core + HttpClient instrumentation, plus a manual client span per Redis operation (`redis AddItem`/`GetCart`/`EmptyCart`, source `Everly.Cart`, `db.system.name=redis`, no ids on the span, errors recorded as status + exception event; the StackExchange.Redis instrumentation package is not used: it needs the connection multiplexer, which the cache client creates internally, so using it means owning the connection first), OTLP/gRPC exporter (batch processor, bounded queue, 2 s export deadline) | Alloy `:4317` → Tempo |
 | **Metrics** | OpenTelemetry .NET: ASP.NET Core, Kestrel, gRPC server and runtime instrumentation, `PeriodicExportingMetricReader` over OTLP/gRPC every 15 s, plus `build_info{service,version,commit}`. Pushed over OTLP; there is no scrape endpoint | Alloy → Mimir |
 | **Logs** | One JSON object per line on stdout (below) **and** the OTel logging provider over OTLP/gRPC | Alloy → Loki |
-| **Profiles** | none: .NET has no continuous profiler (accepted exception to OBS-40) | — |
+| **Profiles** | Continuous CPU profiles with the Grafana Pyroscope .NET profiler (native CLR profiler, release 1.6.1), pushed directly to Pyroscope; on only with `PYROSCOPE_ADDR` (off when unset, `OTEL_SDK_DISABLED=true` and `ENABLE_PROFILING=0` force it off). Application name = `OTEL_SERVICE_NAME`, so `service_name=cart-service`, plus the labels `version` and `environment`; no span-profile link | Pyroscope `:4040` |
 
-**Log line shape** (same as the Go services): `timestamp` (RFC3339 UTC, microseconds), `severity` (`debug`, `info`, `warning`, `error`), `message`, `service`, `version`, then only when present `trace_id` and `span_id` (hex; taken from the current `Activity`, so they appear for lines written while a request is being handled and are absent otherwise), `request_id` (from an `x-request-id` gRPC header, none is sent today), `error` (`Type: message`, no stack trace) and the allow-listed `commit` and `telemetry` on the `starting` line. Anything else in the log state is dropped. An uncaught startup error is one JSON line on stdout (`startup failed`) and exit code 1.
+**Log line shape** (same as the Go services): `timestamp` (RFC3339 UTC, microseconds), `severity` (`debug`, `info`, `warning`, `error`), `message`, `service`, `version`, then only when present `trace_id` and `span_id` (hex; taken from the current `Activity`, so they appear for lines written while a request is being handled and are absent otherwise), `request_id` (from an `x-request-id` gRPC header, none is sent today), `error` (`Type: message`, no stack trace) and the allow-listed `commit`, `telemetry` and `profiling` on the `starting` line. Anything else in the log state is dropped. An uncaught startup error is one JSON line on stdout (`startup failed`) and exit code 1.
 
 ```json
-{"timestamp":"2026-11-14T00:13:05.270351Z","severity":"info","message":"starting","service":"cart-service","version":"9.9.9","commit":"abc1234","telemetry":"on (OTLP http://127.0.0.1:14317/)"}
+{"timestamp":"2026-11-14T00:13:05.270351Z","severity":"info","message":"starting","service":"cart-service","version":"9.9.9","commit":"abc1234","telemetry":"on (OTLP http://127.0.0.1:14317/)","profiling":"off"}
 ```
 
 Every signal carries `service.name`, `service.version`, `service.namespace=everly`, `deployment.environment` and `service.instance.id`. `build_info` is a gauge with the value 1.
@@ -210,19 +216,20 @@ grpcurl -plaintext localhost:7070 grpc.health.v1.Health/Check   # NOT_SERVING if
 
 Requirements: .NET 10 SDK (`global.json` asks for 10.0.100 and rolls forward; the host has 10.0.115), Docker for the image and the Redis integration test, Python 3.12 for the docs check. The commands below are the ones the shared pipeline (`platform-demo-workflows`, `service-ci-dotnet`) runs, so a failure can be reproduced without pushing. `Running locally` above has the run commands.
 
-| Step | Command | Result on 2026-11-21 |
+| Step | Command | Result on 2026-11-22 |
 |---|---|---|
-| Format | `dotnet format cartservice.sln --verify-no-changes` | run, exit 0 |
-| Build | `dotnet build cartservice.sln --configuration Release /warnaserror` | run, 0 errors |
-| Unit tests | `dotnet test tests/cartservice.tests.csproj` (the Redis integration tests skip without `REDIS_ADDR`, the E2E tests skip without a reachable service) | run: 114 passed, 11 skipped |
-| Integration tests (Redis) | `REDIS_ADDR=127.0.0.1:56379 dotnet test tests/cartservice.tests.csproj` against a throwaway `redis:7-alpine` (`docker run -d --rm --name <unique name> --memory 128m -p 127.0.0.1:56379:6379 redis:7-alpine`, remove it afterwards) | run: 120 passed, 5 skipped (the E2E tests); the container was removed afterwards |
-| End-to-end tests | `GRPC_HOST=localhost:7070 dotnet test tests/cartservice.tests.csproj` against a running service | not run (they skipped: no service was reachable) |
+| Format | `dotnet format cartservice.sln --verify-no-changes` | run in `mcr.microsoft.com/dotnet/sdk:10.0`, exit 0 |
+| Build | `CI=true dotnet build cartservice.sln --configuration Release /warnaserror` (locked restore) | run in the SDK container: 0 warnings, 0 errors |
+| Unit tests | `dotnet test tests/cartservice.tests.csproj` (the Redis integration tests skip without `REDIS_ADDR`, the E2E tests skip without a reachable service) | run on the host SDK (10.0.115): 159 passed, 11 skipped |
+| Integration tests (Redis) | `REDIS_ADDR=127.0.0.1:56391 dotnet test tests/cartservice.tests.csproj` against a throwaway `redis:7-alpine` (`docker run -d --rm --name <unique name> --memory 128m -p 127.0.0.1:56391:6379 redis:7-alpine`, remove it afterwards) | run in the SDK container: 165 passed, 5 skipped (the E2E tests); the container was removed afterwards |
+| End-to-end tests | `GRPC_HOST=127.0.0.1:57071 dotnet test tests/cartservice.tests.csproj --filter FullyQualifiedName~E2E` against the built image (throwaway Redis + the image, profiling on, both removed afterwards) | run: 5 passed |
 | Vulnerable packages | `dotnet list src/cartservice.csproj package --vulnerable --include-transitive` | run: no vulnerable packages |
-| Image | `docker build -t platform-demo/cart-service:local .` | not run today |
-| Image scan | `trivy image --severity CRITICAL,HIGH --exit-code 1 platform-demo/cart-service:local` | not run today |
-| Secret scan | `pre-commit run --all-files` (`.pre-commit-config.yaml`, gitleaks) or `gitleaks git --redact` | run with the gitleaks binary of the pre-commit cache (`gitleaks git --redact`, full history, 46 commits): no leaks found |
-| Workflow lint | `actionlint` | run (actionlint 1.7.12), no findings |
-| Docs | `mkdocs build --strict` (mkdocs 1.6.1 + mkdocs-techdocs-core 1.7.1, Python 3.12 venv) and the link check `python3 -I tools/check-md-links.py .` from `platform-demo-workflows` (relative links in `README.md` and `docs/`) | run, both passed |
+| Image | `docker build --platform linux/amd64 --build-arg SERVICE_VERSION=final-test --build-arg SERVICE_COMMIT=<sha> -t platform-demo/cart-service:local .` | run: built (110 MB content, 387 MB disk), user `10001:10001`, exec-form healthcheck healthy, starts and exits 0 on stop with and without `PYROSCOPE_ADDR` |
+| Image scan | `trivy image --severity CRITICAL,HIGH --exit-code 1 platform-demo/cart-service:local` (aquasec/trivy 0.76.1) | run: 0 vulnerabilities, exit 0 |
+| Whole shop | `SKIP_BUILD=1 OBSERVABILITY=1 local/up.sh`, `local/smoke.sh` three times, `local/verify-signals.py` | run: smoke passed 3 times (87 PASS each); verify-signals shows traces, logs, log+trace_id, metrics and profiles for cart-service (the only open cell of the matrix is review-service log+trace_id, which needs a posted review); see [Observability](docs/observability.md) |
+| Secret scan | `pre-commit run --all-files` (`.pre-commit-config.yaml`, gitleaks) or `gitleaks git --redact` | run with the gitleaks binary of the pre-commit cache (`gitleaks git --redact`, full history of the branch): no leaks found |
+| Workflow lint | `actionlint` | run (actionlint from `~/.local/bin`), no findings |
+| Docs | `mkdocs build --strict` (mkdocs 1.6.1 + mkdocs-techdocs-core 1.7.1, Python 3.12 venv) and the link check `python3 -I tools/check-md-links.py .` from `platform-demo-workflows` (relative links in `README.md` and `docs/`) | run, both passed (31 links, 0 broken) |
 
 ## Project structure
 
@@ -232,6 +239,8 @@ Requirements: .NET 10 SDK (`global.json` asks for 10.0.100 and rolls forward; th
 │   ├── JsonLog.cs, JsonLogFormatter.cs  # the one stdout log shape (OBS-30)
 │   ├── ServiceIdentity.cs         # name, version chain, commit, environment, instance id
 │   ├── TelemetryConfig.cs, TelemetryExtensions.cs  # OTLP on/off contract, resource, build_info, export deadlines
+│   ├── HealthProbe.cs             # `cartservice healthcheck` (container HEALTHCHECK, TCP connect)
+│   ├── ProfilingConfig.cs         # PYROSCOPE_ADDR rule as a function (the "starting" line); the entrypoint applies the same rule
 │   ├── RequestIdInterceptor.cs    # x-request-id -> logging scope
 │   ├── appsettings.json           # Kestrel endpoints (7070 h2); log level comes from LOG_LEVEL
 │   ├── cartservice.csproj         # net10.0, TreatWarningsAsErrors, package refs
@@ -242,7 +251,8 @@ Requirements: .NET 10 SDK (`global.json` asks for 10.0.100 and rolls forward; th
 │   └── store/
 │       ├── ICartStore.cs
 │       └── RedisCartStore.cs      # IDistributedCache-backed store
-├── Dockerfile                     # sdk:10.0 builder -> aspnet:10.0 runtime
+├── container/entrypoint.sh        # image entrypoint: loads the Pyroscope .NET profiler only when PYROSCOPE_ADDR is valid
+├── Dockerfile                     # sdk:10.0 builder + profiler stage -> aspnet:10.0 runtime
 ├── cartservice.sln
 ├── global.json / .editorconfig
 └── tests/                         # unit tests, tests/Integration (Redis), tests/E2E (a running service, skipped when it is not reachable)

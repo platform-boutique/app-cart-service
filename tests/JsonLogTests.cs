@@ -167,6 +167,23 @@ namespace cartservice.tests
         }
 
         [Fact]
+        public void StartingLineFields_CommitTelemetryAndProfiling_AreWritten()
+        {
+            (ILogger logger, StringWriter output, ILoggerFactory factory) = NewLogger();
+            using (factory)
+            {
+#pragma warning disable CA1848, CA1873
+                logger.LogInformation("starting {Commit} {Telemetry} {Profiling}", "abc", "off", "on (Pyroscope http://p:4040/)");
+#pragma warning restore CA1848, CA1873
+            }
+
+            JsonElement line = Lines(output).Single();
+            string[] names = [.. line.EnumerateObject().Select(p => p.Name)];
+            Assert.Equal(["timestamp", "severity", "message", "service", "version", "commit", "telemetry", "profiling"], names);
+            Assert.Equal("on (Pyroscope http://p:4040/)", line.GetProperty("profiling").GetString());
+        }
+
+        [Fact]
         public async Task RequestIdHeader_IsOnEveryLineOfThatCall_AndAbsentWithoutHeader()
         {
             (ILogger logger, StringWriter output, ILoggerFactory factory) = NewLogger();
